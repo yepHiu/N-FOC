@@ -35,7 +35,7 @@ project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 # Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME} User/lcd_fonts.c User/lcd_fonts.h User/lcd_image.c User/lcd_image.h User/lcd_spi200.c User/lcd_spi200.h User/w25q64.c User/w25q64.h User/Math/mymath.c User/Math/mymath.h User/flash.c User/flash.h User/config.h User/config.c)
+add_executable(${CMAKE_PROJECT_NAME} User/Hardware/w25q64.c User/Hardware/w25q64.h User/Math/mymath.c User/Math/mymath.h User/flash.c User/flash.h User/config.h User/config.c User/Hardware/as5047p.c User/Hardware/as5047p.h User/Hardware/lcd_fonts.c User/Hardware/lcd_fonts.h User/Hardware/lcd_image.c User/Hardware/lcd_image.h User/Hardware/lcd_spi200.c User/Hardware/lcd_spi200.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -55,6 +55,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
         ./User
         ./User/Math
+        ./User/Hardware
 )
 
 # Add project symbols (macros)

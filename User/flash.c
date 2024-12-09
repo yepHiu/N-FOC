@@ -4,7 +4,7 @@
 
 #include "flash.h"
 #include "octospi.h"
-#include "w25q64.h"
+#include "Hardware/w25q64.h"
 static void flash_init(void){
     OSPI_W25Qxx_Init();
 }

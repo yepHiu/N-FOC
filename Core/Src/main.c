@@ -29,8 +29,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lcd_spi200.h"
-#include "w25q64.h"
+#include "Hardware/w25q64.h"
 #include "config.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,6 +65,39 @@ static void MX_NVIC_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+
+void HareWareInit(void){
+    /*pwm hardware enable*/
+    PWM_Init();
+
+    /*lcd hardware init*/
+    SPI_LCD_Init();
+
+    /*flash hardware init*/
+    OSPI_W25Qxx_Init();
+}
+
+void SoftWareInit(void){
+
+    /*lcd test*/
+    LCD_DisplayString(13,13,"\r\nFlash Test>>>>>>>>>>>>>>>\r\n");
+
+    /* flash test */
+    OSPI_W25Qxx_Test();
+
+    /*lcd clear*/
+    LCD_Clear();
+
+    // encoder
+
+    // svpwm
+
+    // foc control
+
+    /*system it enables*/
+    HAL_UARTEx_ReceiveToIdle_IT(&huart1,RxBuffer,sizeof(RxBuffer)); /* enable RxIdleIt*/
+}
 
 /* USER CODE END 0 */
 
@@ -100,23 +134,25 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-    MX_USART1_UART_Init();
   MX_ADC1_Init();
   MX_OCTOSPI1_Init();
   MX_SPI6_Init();
+  MX_USART1_UART_Init();
   MX_TIM1_Init();
+  MX_SPI4_Init();
+
   /* Initialize interrupts */
   MX_NVIC_Init();
   /* USER CODE BEGIN 2 */
     //HAL_UART_Receive_DMA(&huart1, RxBuffer, 1);
-    printf("\r\nApplication Init start!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\r\n");
-    HAL_UARTEx_ReceiveToIdle_IT(&huart1,RxBuffer,sizeof(RxBuffer)); /* enable RxIdleIt*/
-    PWM_Init();
-    SPI_LCD_Init();
-    LCD_DisplayString(13,13,"LCD Ready!");
-    OSPI_W25Qxx_Init();
-    OSPI_W25Qxx_Test();/* flash test */
-    LCD_Clear();
+    printf("\r\nHareware Init start!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\r\n");
+    HareWareInit();
+    printf("\r\nHareware Init ok!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\r\n");
+
+    printf("\r\nSoftware Init start!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\r\n");
+    SoftWareInit();
+    printf("\r\nSoftware Init ok!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\r\n");
+
     printf("\r\nApplication Ready!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\r\n");
   /* USER CODE END 2 */
 
