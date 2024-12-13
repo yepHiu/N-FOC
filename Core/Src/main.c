@@ -81,7 +81,8 @@ void HareWareInit(void){
 void SoftWareInit(void){
 
     /*lcd test*/
-    LCD_DisplayString(13,13,"\r\nFlash Test>>>>>>>>>>>>>>>\r\n");
+    LCD_SetAsciiFont(&ASCII_Font12);
+    LCD_DisplayString(13,13,"Flash Test>>>>>>>>>>>>>>>");
 
     /* flash test */
     OSPI_W25Qxx_Test();
@@ -95,8 +96,10 @@ void SoftWareInit(void){
 
     // foc control
 
+    /*read parameter*/
+
     /*system it enables*/
-    HAL_UARTEx_ReceiveToIdle_IT(&huart1,RxBuffer,sizeof(RxBuffer)); /* enable RxIdleIt*/
+    HAL_UARTEx_ReceiveToIdle_IT(&huart1,RxBuffer,sizeof(RxBuffer)); /*enable RxIdleIt*/
 }
 
 /* USER CODE END 0 */

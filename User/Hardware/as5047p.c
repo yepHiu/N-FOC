@@ -1,155 +1,307 @@
-//
-// Created by yephi on 12/9/2024.
-//
+/**
+ * @file as5047p.c
+ * @author ZiTe (honmonoh@gmail.com)
+ * @brief  A library for AMS AS5047P rotary position sensor/magnetic encoder.
+ * @copyright MIT License, Copyright (c) 2022 ZiTe
+ *
+ */
 
 #include "as5047p.h"
-#include "stm32h7xx.h"
 
+#define BIT_MODITY(src, i, val) ((src) ^= (-(val) ^ (src)) & (1UL << (i)))
+#define BIT_READ(src, i) (((src) >> (i)&1U))
+#define BIT_TOGGLE(src, i) ((src) ^= 1UL << (i))
 
-//按datasheet中的说到的步骤进行，配置SPI为双全工主机，2字节模式，时钟极性低，相位2，软件使能
-//CSN为SPI片选使能信号，低电平使能，配置为输出模式，可以按自己需要修改引脚号。
+/* Volatile register address. */
+#define AS5047P_NOP ((uint16_t)0x0000)
+#define AS5047P_ERRFL ((uint16_t)0x0001)
+#define AS5047P_PROG ((uint16_t)0x0003)
+#define AS5047P_DIAAGC ((uint16_t)0x3FFC)
+#define AS5047P_MAG ((uint16_t)0x3FFD)
+#define AS5047P_ANGLEUNC ((uint16_t)0x3FFE)
+#define AS5047P_ANGLECOM ((uint16_t)0x3FFF)
 
-AS5047_TypeDef Devs[]=
-        {
-                {&hspi4,GPIOA,GPIO_PIN_4},
-                {&hspi4,GPIOA,GPIO_PIN_3}
-        };
+/* Non-Volatile register address. */
+#define AS5047P_ZPOSM ((uint16_t)0x0016)
+#define AS5047P_ZPOSL ((uint16_t)0x0017)
+#define AS5047P_SETTINGS1 ((uint16_t)0x0018)
+#define AS5047P_SETTINGS2 ((uint16_t)0x0019)
 
+#define AS5047P_STEEINGS1_DEFAULT ((uint8_t)0x01)
+#define AS5047P_STEEINGS2_DEFAULT ((uint8_t)0x00)
 
+#define OP_WRITE ((uint8_t)0)
+#define OP_READ ((uint8_t)1)
 
-#define assert_idx(__devidx)   if(__devidx<0 && __devidx >sizeof(Devs)/sizeof(AS5047_TypeDef) ) error_inf_loop();
-#define CS_1(__devidx) HAL_GPIO_WritePin(Devs[__devidx].CSNport,Devs[__devidx].CSNpin,GPIO_PIN_SET)
-#define CS_0(__devidx) HAL_GPIO_WritePin(Devs[__devidx].CSNport,Devs[__devidx].CSNpin,GPIO_PIN_RESET)
+void as5047p_send_command(const as5047p_handle_t *as5047p_handle, uint16_t address, uint8_t op_read_write);
+void as5047p_send_data(const as5047p_handle_t *as5047p_handle, uint16_t address, uint16_t data);
+uint16_t as5047p_read_data(const as5047p_handle_t *as5047p_handle, uint16_t address);
 
-void error_inf_loop()
+void as5047p_spi_transmit(const as5047p_handle_t *as5047p_handle, uint16_t data);
+uint16_t as5047p_spi_receive(const as5047p_handle_t *as5047p_handle);
+
+void as5047p_nop(const as5047p_handle_t *as5047p_handle);
+void delay(volatile uint16_t t);
+uint8_t is_even_parity(uint16_t data);
+
+/**
+ * @brief Make a AS5047P handle.
+ *
+ * @param[in] spi_send_func
+ * @param[in] spi_read_func
+ * @param[in] spi_select_func
+ * @param[in] spi_deselect_func
+ * @param[in] delay_func The function that delay 350ns for t_CSn.
+ * @param[out] as5047p_handle AS5047P handle.
+ * @return Status code.
+ *         0: Success.
+ */
+int8_t as5047p_make_handle(as5047p_spi_send_t spi_send_func,
+                           as5047p_spi_read_t spi_read_func,
+                           as5047p_spi_deselect_t spi_select_func,
+                           as5047p_spi_deselect_t spi_deselect_func,
+                           as5047p_delay_t delay_func,
+                           as5047p_handle_t *as5047p_handle)
 {
-    while(1);
+    as5047p_handle->spi_send = spi_send_func;
+    as5047p_handle->spi_read = spi_read_func;
+    as5047p_handle->spi_select = spi_select_func;
+    as5047p_handle->spi_deselect = spi_deselect_func;
+    as5047p_handle->delay = delay_func;
+    return 0; /* Success. */
 }
 
-
-uint16_t Parity_bit_Calculate(uint16_t data_2_cal)
+/**
+ * @brief Reset.
+ *
+ * @param as5047p_handle
+ */
+void as5047p_reset(const as5047p_handle_t *as5047p_handle)
 {
-    uint16_t parity_bit_value=0;
-    //自低位开始统计奇偶
-    while(data_2_cal != 0)
+    as5047p_config(as5047p_handle, AS5047P_STEEINGS1_DEFAULT, AS5047P_STEEINGS2_DEFAULT);
+    as5047p_set_zero(as5047p_handle, 0);
+}
+
+/**
+ * @brief Setup AS5047P.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @param settings1 Config 1.
+ * @param settings2 Config 2.
+ */
+void as5047p_config(const as5047p_handle_t *as5047p_handle,
+                    uint8_t settings1,
+                    uint8_t settings2)
+{
+    /* SETTINGS1 bit 0 --> Factory Setting: Pre-Programmed to 1. */
+    BIT_MODITY(settings1, 0, 1);
+
+    /* SETTINGS1 bit 1 --> Not Used: Pre-Programmed to 0, must not be overwritten. */
+    BIT_MODITY(settings1, 1, 0);
+
+    as5047p_send_data(as5047p_handle, AS5047P_SETTINGS1, (uint16_t)(settings1 & 0x00FF));
+    as5047p_send_data(as5047p_handle, AS5047P_SETTINGS2, (uint16_t)(settings2 & 0x00FF));
+}
+
+/**
+ * @brief Reading error flags.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @return Error flags. 0 for no error occurred.
+ */
+uint16_t as5047p_get_error_status(const as5047p_handle_t *as5047p_handle)
+{
+    return as5047p_read_data(as5047p_handle, AS5047P_ERRFL);
+}
+
+/**
+ * @brief Read current position.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @param with_daec With or without dynamic angle error compensation (DAEC).
+ * @param position Current position raw value.
+ * @return Status code.
+ *         0: Success.
+ *         -1: Error occurred.
+ */
+int8_t as5047p_get_position(const as5047p_handle_t *as5047p_handle,
+                            as5047p_daec_t with_daec,
+                            uint16_t *position)
+{
+    uint16_t address;
+    if (with_daec)
     {
-        //(((⑤^④)^③)^②)^①——表达式1假设⑤和④不同，则⑤^④运算结果为1，表示有一个1。表达式1可以化成：((1^③)^②)^①——表达式2
-        parity_bit_value ^= data_2_cal;
-        data_2_cal >>=1;
+        /* Measured angle WITH dynamic angle error compensation(DAEC). */
+        address = AS5047P_ANGLECOM;
     }
-    return (parity_bit_value & 0x1);
+    else
+    {
+        /* Measured angle WITHOUT dynamic angle error compensation(DAEC). */
+        address = AS5047P_ANGLEUNC;
+    }
+
+    uint16_t data = as5047p_read_data(as5047p_handle, address);
+    if (BIT_READ(data, 14) == 0)
+    {
+        *position = data & 0x3FFF;
+        return 0; /* No error occurred. */
+    }
+    return -1; /* Error occurred. */
 }
 
-
-uint16_t SPI_ReadWrite_OneByte(int devidx,uint16_t _txdata)
+/**
+ * @brief Read current angle in degree.
+ *
+ * @param as5047p_handle AS5047P handle
+ * @param with_daec With or without dynamic angle error compensation (DAEC).
+ * @param angle_degree Current angle in degree.
+ * @return Status code.
+ *         0: Success.
+ *         -1: Error occurred.
+ */
+int8_t as5047p_get_angle(const as5047p_handle_t *as5047p_handle, as5047p_daec_t with_daec, float *angle_degree)
 {
-    assert_idx(devidx);
-    CS_0(devidx);
-    uint16_t rxdata;
-    //waring不用管,传进去的是地址数据不会被截断，HAL库根据配置，按16字节的数据格式将16字节的发送出去
-    if(HAL_SPI_TransmitReceive(Devs[devidx].hspin,(uint8_t *)&_txdata,(uint8_t *)&rxdata,1,100) !=HAL_OK)
-        rxdata=0;
-    CS_1(devidx);
-    return rxdata;
+    uint16_t raw_position;
+    int8_t error = as5047p_get_position(as5047p_handle, with_daec, &raw_position);
+    if (error == 0)
+    {
+        /* Angle in degree = value * ( 360 / 2^14). */
+        *angle_degree = raw_position * (360.0 / 0x4000);
+    }
+
+    return error;
 }
-uint16_t AS5047_WriteData(int devidx,uint16_t addr,uint16_t data)
+
+/**
+ * @brief Set specify position as zero.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @param position Position raw value.
+ */
+void as5047p_set_zero(const as5047p_handle_t *as5047p_handle, uint16_t position)
 {
-    //发送地址指令
-    // & 0x3fff 得到 13:0位 data数据 进行奇偶校验位计算
-    if(Parity_bit_Calculate(addr & 0x3fff ) == 1 )
-        addr |= 0x8000;  //将15bit 置1  偶校验
-    CS_0(devidx);
-    SPI_ReadWrite_OneByte(devidx,addr);
-    CS_1(devidx);
+    /* 8 most significant bits of the zero position. */
+    as5047p_send_data(as5047p_handle, AS5047P_ZPOSM, ((position >> 6) & 0x00FF));
 
-    //发送数据指令
-    if(Parity_bit_Calculate(data &0x3fff) ==1)
-        data |=0x8000;
+    /* 6 least significant bits of the zero position. */
+    as5047p_send_data(as5047p_handle, AS5047P_ZPOSL, (position & 0x003F));
 
-    uint16_t feedback;
-    CS_0(devidx);
-    feedback = SPI_ReadWrite_OneByte(devidx,data);
-    CS_1(devidx);
-
-    return feedback;
+    as5047p_nop(as5047p_handle);
 }
-uint16_t AS5047_ReadData(int devidx,uint16_t addr)
-{
-    uint16_t data;
-    if(Parity_bit_Calculate(addr) ==0 )
-        addr |=0x8000; //1000 0000 0000 0000
-    addr |= AS5047_COMMAND_READ; //0100 0000 0000 0000
-    SPI_ReadWrite_OneByte(devidx,addr);
-    data=SPI_ReadWrite_OneByte(devidx,NOP_AS5047P_VOL_REG_ADD);  //ANGLECOM_AS5047P_VOL_REG_ADD=11 1111 1111
-    data &=0x3fff;
 
-//	SPI_ReadWrite_OneByte(devidx,addr);
-//	data = SPI_ReadWrite_OneByte(devidx,addr);
-    //此处可以做奇偶校验判断是否接收到正确数据，但是也可以不做，直接去掉15，14bit
-    data &= 0x3fff;
+/**
+ * @brief No operation instruction.
+ *
+ * @param as5047p_handle AS5047P handle.
+ */
+inline void as5047p_nop(const as5047p_handle_t *as5047p_handle)
+{
+    /* Reading the NOP register is equivalent to a nop (no operation) instruction. */
+    as5047p_send_command(as5047p_handle, AS5047P_NOP, OP_READ);
+}
+
+/**
+ * @brief Sending read or write command to AS5047P.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @param address Register address.
+ * @param op_read_write Read of write opration.
+ */
+void as5047p_send_command(const as5047p_handle_t *as5047p_handle, uint16_t address, uint8_t op_read_write)
+{
+    uint16_t frame = address & 0x3FFF;
+
+    /* R/W: 0 for write, 1 for read. */
+    BIT_MODITY(frame, 14, op_read_write);
+
+    /* Parity bit(even) calculated on the lower 15 bits. */
+    if (!is_even_parity(frame))
+    {
+        BIT_TOGGLE(frame, 15);
+    }
+
+    as5047p_spi_transmit(as5047p_handle, frame);
+}
+
+/**
+ * @brief Sending data to register.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @param address Register address.
+ * @param data Data.
+ */
+void as5047p_send_data(const as5047p_handle_t *as5047p_handle, uint16_t address, uint16_t data)
+{
+    uint16_t frame = data & 0x3FFF;
+
+    /* Data frame bit 14 always low(0). */
+    BIT_MODITY(frame, 14, 0);
+
+    /* Parity bit(even) calculated on the lower 15 bits. */
+    if (!is_even_parity(frame))
+    {
+        BIT_TOGGLE(frame, 15);
+    }
+
+    as5047p_send_command(as5047p_handle, address, OP_WRITE);
+    as5047p_spi_transmit(as5047p_handle, frame);
+}
+
+/**
+ * @brief Reading data from register.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @param address Register address.
+ * @return Data.
+ */
+uint16_t as5047p_read_data(const as5047p_handle_t *as5047p_handle, uint16_t address)
+{
+    as5047p_send_command(as5047p_handle, address, OP_READ);
+    return as5047p_spi_receive(as5047p_handle);
+}
+
+/**
+ * @brief Start SPI transmit.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @param data Data.
+ */
+inline void as5047p_spi_transmit(const as5047p_handle_t *as5047p_handle, uint16_t data)
+{
+    as5047p_handle->delay();
+
+    as5047p_handle->spi_select();
+    as5047p_handle->spi_send(data);
+    as5047p_handle->spi_deselect();
+}
+
+/**
+ * @brief Start SPI receive.
+ *
+ * @param as5047p_handle AS5047P handle.
+ * @return Received data.
+ */
+inline uint16_t as5047p_spi_receive(const as5047p_handle_t *as5047p_handle)
+{
+    as5047p_handle->delay();
+
+    as5047p_handle->spi_select();
+    uint16_t data = as5047p_handle->spi_read();
+    as5047p_handle->spi_deselect();
+
     return data;
 }
 
-
-
-
-
-
-
-
-void AS5047_Init(void)
+/**
+ * @brief Check data even parity.
+ */
+uint8_t is_even_parity(uint16_t data)
 {
-    //设置ABI模式，输出分辨1024.
-    for(int i=0;i<sizeof(Devs)/sizeof(AS5047_TypeDef);i++)
+    uint8_t shift = 1;
+    while (shift < (sizeof(data) * 8))
     {
-        AS5047_WriteData(i,SETTINGS1_AS5047P_nVOL_REG_ADD,5); //0000 0101
-        AS5047_WriteData(i,SETTINGS2_AS5047P_nVOL_REG_ADD,0);
+        data ^= (data >> shift);
+        shift <<= 1;
     }
-
-
+    return !(data & 0x1);
 }
-void AS5047_SetZeroPosition(int devidx)
-{
-    uint16_t DIAAGC=AS5047_ReadData(devidx,DIAAGC_AS5047P_VOL_REG_ADD);
-    //获取当前角度
-    uint16_t ANGLEUNC=AS5047_ReadData(devidx,ANGLEUNC_AS5047P_VOL_REG_ADD);
-    //												ANGLEUNC是13:0 14个有效数字，右移6获取高8位。
-    AS5047_WriteData(devidx,ZPOSM_AS5047P_nVOL_REG_ADD,(ANGLEUNC >>6) & 0x00ff);
-    //																							得到低6位 & 11 1111
-    AS5047_WriteData(devidx,ZPOSL_AS5047P_nVOL_REG_ADD, ANGLEUNC  & 0x003f);
-}
-
-void AS5047_Diagnostics(void)
-{
-    ;
-}
-
-
-
-uint16_t AS5047D_Get_MAGCORDIC_Value(int devidx)
-{
-    unsigned int CORDICMAG = AS5047_ReadData(devidx,MAG_AS5047P_VOL_REG_ADD);
-    return CORDICMAG;
-}
-
-unsigned int AS5047P_Get_AGC_Value(int devidx)
-{
-    unsigned int DIAAGC = AS5047_ReadData(devidx,DIAAGC_AS5047P_VOL_REG_ADD);
-    return (unsigned char)((DIAAGC >> 8) & 0x00FF);
-}
-
-
-uint16_t AS5047_Get_ZeroPosition(int devidx)
-{
-    uint16_t ZPOSM=AS5047_ReadData(devidx,ZPOSM_AS5047P_nVOL_REG_ADD);
-    uint16_t ZPOSL=AS5047_ReadData(devidx,ZPOSL_AS5047P_nVOL_REG_ADD);
-    //将高八位和低6位拼起来
-    return ( ZPOSM<<6 ) & (ZPOSL & 0x003f ) ;
-}
-
-uint16_t AS5047_Get_ERRFL(int devidx)
-{
-    return AS5047_ReadData(devidx,ERRFL_AS5047P_VOL_REG_ADD);
-}
-
-

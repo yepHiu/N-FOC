@@ -1,52 +1,85 @@
-//
-// Created by yephi on 12/9/2024.
-//
+/**
+ * @file as5047p.h
+ * @author ZiTe (honmonoh@gmail.com)
+ * @brief  A library for AMS AS5047P rotary position sensor/magnetic encoder.
+ * @copyright MIT License, Copyright (c) 2022 ZiTe
+ * @remark AS5047P SPI Interface:
+ *         - Mode=1(CPOL=0, CPHA=1).
+ *             - CPOL=0 --> Clock is low when idle.
+ *             - CPHA=1 --> Data is sampled on the second edge(falling edge).
+ *         - CSn(chip select) active low.
+ *         - Data size=16-bit.
+ *         - Bit order is MSB first.
+ *         - Max clock rates up to 10 MHz.
+ *         - Only supports slave operation mode.
+ *
+ */
 
-#ifndef PROJECT_AS5047P_H
-#define PROJECT_AS5047P_H
+#ifndef AS5047P_H
+#define AS5047P_H
 
-#include "spi.h"
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
+#include <stdint.h>
 
-//spi command frame 格式
-#define AS5047_COMMAND_READ 0x4000
+typedef void (*as5047p_spi_send_t)(uint16_t data);
+typedef uint16_t (*as5047p_spi_read_t)(void);
+typedef void (*as5047p_spi_select_t)(void);
+typedef void (*as5047p_spi_deselect_t)(void);
 
+/**
+ * @brief t_CSn: High time of CSn between two transmissions, Min: 350 ns.
+ */
+typedef void (*as5047p_delay_t)(void);
+
+/**
+ * @brief Dynamic angle error compensation (DAEC).
+ */
+typedef enum
+{
+    without_daec = 0,
+    with_daec = !without_daec
+} as5047p_daec_t;
 
 typedef struct
 {
-    SPI_HandleTypeDef *hspin;
-    GPIO_TypeDef *CSNport;
-    uint16_t CSNpin;
-}AS5047_TypeDef;
+    as5047p_spi_send_t spi_send;
+    as5047p_spi_read_t spi_read;
+    as5047p_spi_select_t spi_select;
+    as5047p_spi_deselect_t spi_deselect;
+    as5047p_delay_t delay;
+} as5047p_handle_t;
 
-//Volatil Registers 的 addrees mapping
-#define	NOP_AS5047P_VOL_REG_ADD 0x0000
-#define ERRFL_AS5047P_VOL_REG_ADD 0x0001
-#define PROG_AS5047P_VOL_REG_ADD 0x0003
-#define DIAAGC_AS5047P_VOL_REG_ADD 0x3ffc
-#define MAG_AS5047P_VOL_REG_ADD 0x3ffd
-#define ANGLEUNC_AS5047P_VOL_REG_ADD 0x3ffe
-#define ANGLECOM_AS5047P_VOL_REG_ADD 0x3fff
+int8_t as5047p_make_handle(as5047p_spi_send_t spi_send_func,
+                           as5047p_spi_read_t spi_read_func,
+                           as5047p_spi_deselect_t spi_select_func,
+                           as5047p_spi_deselect_t spi_deselect_func,
+                           as5047p_delay_t delay_func,
+                           as5047p_handle_t *as5047p_handle);
 
-//non-volatile-registers 的 addrees mapping
-#define ZPOSM_AS5047P_nVOL_REG_ADD 0x0016
-#define ZPOSL_AS5047P_nVOL_REG_ADD 0x0017
-#define SETTINGS1_AS5047P_nVOL_REG_ADD 0x0018
-#define SETTINGS2_AS5047P_nVOL_REG_ADD 0x0019
-#define RED_AS5047P_VOL_nREG_ADD 0x001a
+void as5047p_reset(const as5047p_handle_t *as5047p_handle);
 
+void as5047p_config(const as5047p_handle_t *as5047p_handle,
+                    uint8_t settings1,
+                    uint8_t settings2);
 
+void as5047p_set_zero(const as5047p_handle_t *as5047p_handle, uint16_t position);
 
-//------------------------------------------------
-/*function prototype*/
-void AS5047_Init(void);
-void AS5047_SetZeroPosition(int devidx);
-uint16_t AS5047_Get_ZeroPosition(int devidx);
-uint16_t AS5047_Get_ERRFL(int devidx);
-uint16_t AS5047_WriteData(int devidx,uint16_t addr,uint16_t data);
-uint16_t AS5047_ReadData(int devidx,uint16_t addr);
+int8_t as5047p_get_position(const as5047p_handle_t *as5047p_handle,
+                            as5047p_daec_t with_daec,
+                            uint16_t *position);
 
+int8_t as5047p_get_angle(const as5047p_handle_t *as5047p_handle,
+                         as5047p_daec_t with_daec,
+                         float *angle_degree);
 
+uint16_t as5047p_get_error_status(const as5047p_handle_t *as5047p_handle);
 
+#ifdef __cplusplus
+}
+#endif
 
-#endif //PROJECT_AS5047P_H
+#endif /* AS5047P_H */
