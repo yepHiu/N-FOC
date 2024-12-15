@@ -78,6 +78,14 @@ int8_t as5047p_get_angle(const as5047p_handle_t *as5047p_handle,
 
 uint16_t as5047p_get_error_status(const as5047p_handle_t *as5047p_handle);
 
+void as5047p_spi_send(uint16_t data);
+uint16_t as5047p_spi_read(void);
+void as5047p_spi_select(void);
+void as5047p_spi_deselect(void);
+void as5047p_delay(void);
+
+extern as5047p_handle_t as5047p;
+
 #ifdef __cplusplus
 }
 #endif

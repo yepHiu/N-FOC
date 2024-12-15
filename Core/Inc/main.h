@@ -59,6 +59,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define CTL_PERIOD 550000000/CTL_FREQUENCY
 #define CTL_FREQUENCY 20000
+#define AS5047P_CS_Pin GPIO_PIN_4
+#define AS5047P_CS_GPIO_Port GPIOE
 #define LED1_Pin GPIO_PIN_7
 #define LED1_GPIO_Port GPIOG
 #define LCD_Backlight_Pin_Pin GPIO_PIN_12

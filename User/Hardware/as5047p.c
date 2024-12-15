@@ -7,10 +7,15 @@
  */
 
 #include "as5047p.h"
+#include "stm32h7xx.h"
+#include "spi.h"
+#include "gpio.h"
 
 #define BIT_MODITY(src, i, val) ((src) ^= (-(val) ^ (src)) & (1UL << (i)))
 #define BIT_READ(src, i) (((src) >> (i)&1U))
 #define BIT_TOGGLE(src, i) ((src) ^= 1UL << (i))
+
+#define AS5047P_SPI_HANDLE  hspi4
 
 /* Volatile register address. */
 #define AS5047P_NOP ((uint16_t)0x0000)
@@ -43,6 +48,8 @@ uint16_t as5047p_spi_receive(const as5047p_handle_t *as5047p_handle);
 void as5047p_nop(const as5047p_handle_t *as5047p_handle);
 void delay(volatile uint16_t t);
 uint8_t is_even_parity(uint16_t data);
+
+as5047p_handle_t as5047p;
 
 /**
  * @brief Make a AS5047P handle.
@@ -304,4 +311,34 @@ uint8_t is_even_parity(uint16_t data)
         shift <<= 1;
     }
     return !(data & 0x1);
+}
+
+
+void as5047p_spi_send(uint16_t data)
+{
+    /* Dummy send. */
+    HAL_SPI_Transmit(&AS5047P_SPI_HANDLE, (uint8_t *)&data, 1, HAL_MAX_DELAY);
+}
+
+uint16_t as5047p_spi_read(void)
+{
+    uint16_t data=0;
+    /* Dummy read. */
+    HAL_SPI_Receive(&AS5047P_SPI_HANDLE, (uint8_t *)&data, 1, HAL_MAX_DELAY);
+    return data;
+}
+
+void as5047p_spi_select(void)
+{
+    HAL_GPIO_WritePin(AS5047P_CS_GPIO_Port, AS5047P_CS_Pin, GPIO_PIN_RESET);
+}
+
+void as5047p_spi_deselect(void)
+{
+    HAL_GPIO_WritePin(AS5047P_CS_GPIO_Port, AS5047P_CS_Pin, GPIO_PIN_SET);
+}
+
+void as5047p_delay(void)
+{
+    HAL_Delay(1);
 }

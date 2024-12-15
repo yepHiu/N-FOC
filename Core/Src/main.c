@@ -31,6 +31,7 @@
 #include "lcd_spi200.h"
 #include "Hardware/w25q64.h"
 #include "config.h"
+#include "as5047p.h"
 
 /* USER CODE END Includes */
 
@@ -76,6 +77,17 @@ void HareWareInit(void){
 
     /*flash hardware init*/
     OSPI_W25Qxx_Init();
+
+    /*encoder hardware init*/
+    as5047p_make_handle(
+            &as5047p_spi_send,
+            &as5047p_spi_read,
+            &as5047p_spi_select,
+            &as5047p_spi_deselect,
+            &as5047p_delay,
+            &as5047p);
+    as5047p_config(&as5047p, 0x25, 0x00); // 0b00100101 -> 0x25, 0b00000000 -> 0x00
+    as5047p_set_zero(&as5047p,0);
 }
 
 void SoftWareInit(void){
@@ -90,7 +102,14 @@ void SoftWareInit(void){
     /*lcd clear*/
     LCD_Clear();
 
-    // encoder
+    /* encoder test;*/
+    float angle_deg;
+    int8_t error = as5047p_get_angle(&as5047p, without_daec, &angle_deg);
+
+    if (error == 0)
+    {
+        printf("Angle: %f\r\n", angle_deg);
+    }
 
     // svpwm
 
